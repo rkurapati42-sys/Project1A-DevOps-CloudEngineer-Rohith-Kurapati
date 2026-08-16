@@ -1,1 +1,53 @@
 
+name: NovaPay Zero-Downtime CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, 'release/*' ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+      - name: Build & Unit Test
+        run: ./gradlew build test jacocoTestReport
+      - name: Quality Gate Coverage Check
+        run: ./scripts/check-coverage.sh --min-line 80 --min-branch 70
+
+  sast-scan:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: SonarQube Quality Profile Scan
+        uses: sonarqube-quality-gate-action@v1
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          projectKey: novapay-backend
+
+  security-and-compliance:
+    needs: sast-scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trivy Container & Dependency Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'novapay-app:${{ github.sha }}'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+      - name: Generate CycloneDX SBOM
+        run: syft packages novapay-app:${{ github.sha }} -o cyclonedx-json > sbom.json
+      - name: Cosign Image Sign
+        run: cosign sign --key env://COSIGN_PRIVATE_KEY novapay-app:${{ github.sha }}
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
