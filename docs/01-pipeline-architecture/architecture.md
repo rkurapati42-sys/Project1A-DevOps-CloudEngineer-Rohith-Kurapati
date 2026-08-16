@@ -1,1 +1,1 @@
-
+ Detail the 8 canonical stages (Source Control $\rightarrow$ Build/Unit Test $\rightarrow$ SAST $\rightarrow$ Container/SBOM Scanning $\rightarrow$ Contract Testing $\rightarrow$ DAST $\rightarrow$ OPA Policy Gates $\rightarrow$ Blue-Green/Canary Deployment) with an under 2-hour commit-to-production SLA.
