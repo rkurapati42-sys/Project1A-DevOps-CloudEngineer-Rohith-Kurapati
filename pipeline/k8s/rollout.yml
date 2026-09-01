@@ -1,0 +1,60 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: novapay-core
+  namespace: production
+spec:
+  replicas: 5
+  strategy:
+    canary:
+      # Istio Routing configuration
+      trafficRouting:
+        istio:
+          virtualService:
+            name: novapay-vservice
+            routes:
+              - primary
+      steps:
+        # Step 1: Route 10% traffic to Canary
+        - setWeight: 10
+        - pause: { duration: 5m }
+
+        # Step 2: Route 25% traffic and run analysis
+        - setWeight: 25
+        - pause: { duration: 10m }
+
+        # Step 3: Route 50% traffic
+        - setWeight: 50
+        - pause: { duration: 10m }
+
+      # Automated Rollback Triggers based on Prometheus metrics
+      analysis:
+        templates:
+          - templateName: success-rate-and-latency
+        args:
+          - name: service-name
+            value: novapay-core
+  selector:
+    matchLabels:
+      app: novapay-core
+  template:
+    metadata:
+      labels:
+        app: novapay-core
+    spec:
+      containers:
+        - name: novapay-core
+          image: novapay/core:latest
+          ports:
+            - containerPort: 8080
+          securityContext:
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            privileged: false
+          resources:
+            limits:
+              cpu: "1000m"
+              memory: "1024Mi"
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
