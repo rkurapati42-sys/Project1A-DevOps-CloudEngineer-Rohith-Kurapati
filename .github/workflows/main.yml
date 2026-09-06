@@ -1,1 +1,21 @@
+name: Novapay CI-CD pipeline
+on: 
+ push: 
+   branches:
+jobs:
+  #stage 1&2:Build & unit test
+  build-and-test:
+  name: "stage 2:build& unit test"
+    runs-on: ubuntu-latest
+steps:
+-name: check out repository code
+uses: actions/checkout@v4
+-name: set up java 21
+uses: actions/setup-java@v4
+with:
+distribution: 'termurin'
+  java-version:'21'
+  
+-name: run build and unit tests
+run: ./gradlew build test.
 
