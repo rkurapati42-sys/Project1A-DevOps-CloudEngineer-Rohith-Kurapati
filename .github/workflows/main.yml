@@ -21,6 +21,6 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '21'
-
       - name: Run build and unit tests
+        working-directory: ./app
         run: ./gradlew build test
