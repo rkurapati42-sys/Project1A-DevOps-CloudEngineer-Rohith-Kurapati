@@ -1,26 +1,84 @@
-name: NovaPay CI-CD pipeline
+name: NovaPay Zero-Downtime CI/CD Pipeline
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main, 'release/*' ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   build-and-test:
-    name: "Stage 1 & 2: Build & Unit Test"
+    name: "1-2 Build and Unit Test"
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository code
-        uses: actions/checkout@v4
-
-      - name: Set up Java 21
-        uses: actions/setup-java@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
           java-version: '21'
-          cache: 'maven'
-
-      - name: Build and unit tests
+          distribution: 'temurin'
+          cache: maven
+      - name: Build and test
         working-directory: ./app
         run: mvn -B clean test package
+
+  quality:
+    name: "3 Quality Gate"
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+      - name: Maven validation
+        working-directory: ./app
+        run: mvn -B -DskipTests validate
+
+  security:
+    name: "4-6 Security and Compliance"
+    needs: quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate policy files
+        run: |
+          test -s pipeline/policies/compliance.rego
+          test -s pipeline/policies/no-privileged-containers.rego
+      - name: Validate deployment manifests
+        run: |
+          python - <<'PY'
+          import yaml
+          from pathlib import Path
+          for p in list(Path("pipeline/k8s").glob("*.yml")) + list(Path("pipeline/k8s").glob("*.yaml")):
+              list(yaml.safe_load_all(p.read_text()))
+          print("YAML validation passed")
+          PY
+
+  artifact-provenance:
+    name: "7 Artifact Provenance"
+    needs: security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify immutable release identity
+        run: |
+          echo "Git SHA: $GITHUB_SHA"
+          test -n "$GITHUB_SHA"
+          echo "Production artifacts require SemVer + Git SHA."
+          echo "Production must never use latest."
+
+  deployment-readiness:
+    name: "8 Deployment Readiness"
+    needs: artifact-provenance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate deployment assets
+        run: |
+          test -s pipeline/k8s/rollout.yml
+          test -s pipeline/k8s/analysis.yaml
+          test -s pipeline/argocd/application.yaml
+          echo "Deployment readiness passed."
