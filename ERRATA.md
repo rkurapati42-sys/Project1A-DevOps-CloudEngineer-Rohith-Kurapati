@@ -1,5 +1,15 @@
-# Errata & Deliberate Error Findings
+# NovaPay Assessment Errata
 
-1. **Part A (Section A3.2 / A3.4)**: Chi-squared analysis is incorrectly referenced for continuous latency distributions; Welch's t-test or Mann-Whitney U should be used.
-2. **Part C (Case Study 3)**: Cloudflare Outage Duration stated as 21 minutes in the initial text note, whereas the actual outage was 27 minutes.
-3. **Part D (Section D3)**: Timeline claims 15-day progressive build, but regulatory RBI Master Direction compliance requires immutable dual-CAB approval gates prior to production triggers.
+This file records the three deliberate technical errors required by the assessment.
+
+## Part A — CI/CD Pipeline Error
+The original pipeline referenced Gradle wrapper execution even though the application build is Maven-based. Correct implementation uses Maven with the committed pom.xml and Java 21.
+
+## Part C — Compliance Error
+A trusted-registry check was initially described as image-signature verification. Registry origin alone does not prove cryptographic signing. Production admission must verify the image signature using the approved signing/verification mechanism.
+
+## Part D — Deployment Error
+The initial canary configuration used a 10% starting weight and stopped before the required final 100% promotion. The corrected strategy follows the required progression: 1–2%, 5–10%, 25–50%, then 100%, with health gates and rollback criteria at each stage.
+
+## Correction Principle
+Errata corrections must be reflected in the implementation and validated before final submission.
