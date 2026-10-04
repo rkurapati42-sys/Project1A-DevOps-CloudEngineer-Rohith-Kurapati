@@ -1,5 +1,4 @@
-
-name: Novapay CI-CD pipeline
+name: NovaPay CI-CD pipeline
 
 on:
   push:
@@ -7,7 +6,6 @@ on:
       - main
 
 jobs:
-  # Stage 1 & 2: Build & Unit Test
   build-and-test:
     name: "Stage 1 & 2: Build & Unit Test"
     runs-on: ubuntu-latest
@@ -21,6 +19,8 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '21'
-      - name: Run build and unit tests
+          cache: 'maven'
+
+      - name: Build and unit tests
         working-directory: ./app
-        run: ./gradlew build test
+        run: mvn -B clean test package
