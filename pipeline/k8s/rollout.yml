@@ -7,7 +7,6 @@ spec:
   replicas: 5
   strategy:
     canary:
-      # Istio Routing configuration
       trafficRouting:
         istio:
           virtualService:
@@ -15,19 +14,15 @@ spec:
             routes:
               - primary
       steps:
-        # Step 1: Route 10% traffic to Canary
-        - setWeight: 10
+        - setWeight: 2
         - pause: { duration: 5m }
-
-        # Step 2: Route 25% traffic and run analysis
+        - setWeight: 10
+        - pause: { duration: 10m }
         - setWeight: 25
         - pause: { duration: 10m }
-
-        # Step 3: Route 50% traffic
         - setWeight: 50
         - pause: { duration: 10m }
-
-      # Automated Rollback Triggers based on Prometheus metrics
+        - setWeight: 100
       analysis:
         templates:
           - templateName: success-rate-and-latency
@@ -44,7 +39,7 @@ spec:
     spec:
       containers:
         - name: novapay-core
-          image: novapay/core:latest
+          image: novapay/core:1.0.0-REPLACE_WITH_GIT_SHA
           ports:
             - containerPort: 8080
           securityContext:
