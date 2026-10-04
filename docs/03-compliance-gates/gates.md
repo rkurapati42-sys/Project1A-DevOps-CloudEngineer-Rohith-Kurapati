@@ -144,3 +144,32 @@ Example:
 
 ```text
 novapay:1.2.3-8c6c5b9
+## Gate 8 — Image Signing
+
+Production container images must be cryptographically signed.
+
+### Requirement
+
+Images must be signed using Cosign or an equivalent approved signing mechanism.
+
+Unsigned images must never be deployed to production.
+
+### Admission Control
+
+An OPA or Kyverno admission policy must reject unsigned production images.
+
+```text
+Developer Commit
+      |
+     Build
+      |
+Container Image
+      |
+    Sign
+      |
+Admission Controller
+   /           \
+Signed        Unsigned
+  |              |
+Allow           Reject
+
