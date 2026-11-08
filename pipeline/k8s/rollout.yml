@@ -49,7 +49,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: novapay-core
-          image: ghcr.io/rkurapati42-sys/novapay@sha256:37f55d562724ebf13eef6ef2595a6187d434a322f59161309b4a07299e6f5f48
+          image: ghcr.io/rkurapati42-sys/novapay@sha256:5b385b2ea282f30c665ffce043036d9642a65da7fc22331779e0e67f68cc3a52
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
