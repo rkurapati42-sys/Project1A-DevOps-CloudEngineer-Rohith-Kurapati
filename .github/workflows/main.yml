@@ -2,7 +2,7 @@ name: NovaPay Zero-Downtime CI/CD Pipeline
 
 on:
   push:
-    branches: [ main, 'release/**', 'feat/**' ]
+    branches: [ main, 'release/**' ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
