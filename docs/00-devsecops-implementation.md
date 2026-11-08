@@ -82,7 +82,7 @@ See `docs/09-container-security-ghcr.md` for release details.
 - Kustomize groups the Namespace, Rollout, AnalysisTemplate, Services, and Istio VirtualService.
 - Argo Rollouts uses stable/canary Services and Istio traffic weights.
 - Prometheus analysis checks success rate and p99 latency before traffic progresses.
-- The rollout manifest contains an explicit image placeholder. A release must replace it with the exact verified GHCR SHA/digest before Argo CD sync; do not apply the placeholder.
+- The rollout manifest is pinned to the verified immutable GHCR digest for the current release. Confirm cluster prerequisites, registry pull access, and Cosign policy before Argo CD sync; update the digest through a reviewed release change for subsequent versions.
 
 ## Phase 5 — operational verification
 
