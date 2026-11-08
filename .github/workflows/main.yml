@@ -41,10 +41,10 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-  sonarcloud:
-    name: "3 SonarCloud Quality Gate"
+  sonarqube:
+    name: "3 Self-hosted SonarQube Quality Gate"
     needs: build-and-test
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.SONAR_RUNNER_LABEL || 'ubuntu-latest' }}
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
@@ -54,30 +54,31 @@ jobs:
           java-version: '21'
           distribution: temurin
           cache: maven
-      - name: Verify SonarCloud configuration
+      - name: Verify SonarQube configuration
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
+          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
           SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
         run: |
           test -n "$SONAR_TOKEN" || { echo "::error::Add repository secret SONAR_TOKEN"; exit 1; }
-          test -n "$SONAR_ORGANIZATION" || { echo "::error::Add repository variable SONAR_ORGANIZATION"; exit 1; }
+          test -n "$SONAR_HOST_URL" || { echo "::error::Add repository variable SONAR_HOST_URL"; exit 1; }
           test -n "$SONAR_PROJECT_KEY" || { echo "::error::Add repository variable SONAR_PROJECT_KEY"; exit 1; }
-      - name: Run SonarCloud analysis and wait for Quality Gate
+          case "$SONAR_HOST_URL" in
+            https://*) ;;
+            http://*) echo "::warning::SONAR_HOST_URL uses HTTP; use HTTPS for production deployments" ;;
+            *) echo "::error::SONAR_HOST_URL must include http:// or https://"; exit 1 ;;
+          esac
+          case "$SONAR_HOST_URL" in
+            *sonarcloud.io*) echo "::error::Configure the self-hosted SonarQube server URL, not SonarCloud"; exit 1 ;;
+          esac
+      - name: Run SonarQube analysis and wait for Quality Gate
         working-directory: app
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
+          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
           SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
         run: |
-          mvn -B --no-transfer-progress clean verify \
-            org.sonarsource.scanner.maven:sonar-maven-plugin:5.1.0.4751:sonar \
-            -Dsonar.host.url=https://sonarcloud.io \
-            -Dsonar.organization="$SONAR_ORGANIZATION" \
-            -Dsonar.projectKey="$SONAR_PROJECT_KEY" \
-            -Dsonar.token="$SONAR_TOKEN" \
-            -Dsonar.qualitygate.wait=true \
-            -Dsonar.qualitygate.timeout=300
+          mvn -B --no-transfer-progress clean verify             org.sonarsource.scanner.maven:sonar-maven-plugin:5.1.0.4751:sonar             -Dsonar.host.url="$SONAR_HOST_URL"             -Dsonar.projectKey="$SONAR_PROJECT_KEY"             -Dsonar.token="$SONAR_TOKEN"             -Dsonar.qualitygate.wait=true             -Dsonar.qualitygate.timeout=300
 
   codeql:
     name: "4 SAST - CodeQL"
@@ -158,9 +159,7 @@ jobs:
           PY
       - name: Install pinned Conftest
         run: |
-          curl --fail --silent --show-error --location \
-            https://github.com/open-policy-agent/conftest/releases/download/v0.56.0/conftest_0.56.0_Linux_x86_64.tar.gz \
-            | tar -xz
+          curl --fail --silent --show-error --location             https://github.com/open-policy-agent/conftest/releases/download/v0.56.0/conftest_0.56.0_Linux_x86_64.tar.gz             | tar -xz
           sudo install -m 0755 conftest /usr/local/bin/conftest
           conftest --version
       - name: Evaluate OPA policies against Kubernetes manifests
@@ -168,7 +167,7 @@ jobs:
 
   artifact-readiness:
     name: "7 Artifact and Provenance Readiness"
-    needs: [sonarcloud, codeql, security, compliance]
+    needs: [sonarqube, codeql, security, compliance]
     runs-on: ubuntu-latest
     steps:
       - name: Record immutable source identity
