@@ -2,48 +2,63 @@ package com.novapay;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.http.MediaType;
-import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.boot.test.web.server.LocalServerPort;
 
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 
-@SpringBootTest
-@AutoConfigureMockMvc
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class PaymentApiContractTests {
 
-    @Autowired
-    private MockMvc mockMvc;
+    @LocalServerPort
+    private int port;
+
+    private final HttpClient httpClient = HttpClient.newHttpClient();
 
     @Test
     void paymentEndpointHonorsRequestAndResponseContract() throws Exception {
-        mockMvc.perform(post("/api/v1/payments")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "fromAccount": "ACC-1001",
-                                  "toAccount": "ACC-2002",
-                                  "amount": 125.50
-                                }
-                                """))
-                .andExpect(status().isOk())
-                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
-                .andExpect(jsonPath("$.transactionId").isNotEmpty())
-                .andExpect(jsonPath("$.status").value("SUCCESS"))
-                .andExpect(jsonPath("$.fromAccount").value("ACC-1001"))
-                .andExpect(jsonPath("$.toAccount").value("ACC-2002"))
-                .andExpect(jsonPath("$.amount").value(125.50));
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("http://127.0.0.1:" + port + "/api/v1/payments"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString("""
+                        {
+                          "fromAccount": "ACC-1001",
+                          "toAccount": "ACC-2002",
+                          "amount": 125.50
+                        }
+                        """))
+                .build();
+
+        HttpResponse<String> response = httpClient.send(
+                request, HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(200, response.statusCode());
+        assertTrue(response.headers().firstValue("Content-Type")
+                .orElse("").contains("application/json"));
+        assertTrue(response.body().contains("\"transactionId\""));
+        assertTrue(response.body().contains("\"status\":\"SUCCESS\""));
+        assertTrue(response.body().contains("\"fromAccount\":\"ACC-1001\""));
+        assertTrue(response.body().contains("\"toAccount\":\"ACC-2002\""));
+        assertTrue(response.body().contains("\"amount\":125.50"));
     }
 
     @Test
     void readinessEndpointExposesSpringBootProbeContract() throws Exception {
-        mockMvc.perform(get("/actuator/health/readiness"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("UP"));
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("http://127.0.0.1:" + port + "/actuator/health/readiness"))
+                .GET()
+                .build();
+
+        HttpResponse<String> response = httpClient.send(
+                request, HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(200, response.statusCode());
+        assertTrue(response.body().contains("\"status\":\"UP\""));
     }
 }
