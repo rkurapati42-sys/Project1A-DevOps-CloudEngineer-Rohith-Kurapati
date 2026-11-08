@@ -69,10 +69,8 @@ deny contains msg if {
     workload
     some container in containers
     image := object.get(container, "image", "")
-    not (
-        startswith(image, "ghcr.io/rkurapati42-sys/novapay:")
-        or startswith(image, "ghcr.io/rkurapati42-sys/novapay@sha256:")
-    )
+    not startswith(image, "ghcr.io/rkurapati42-sys/novapay:")
+    not startswith(image, "ghcr.io/rkurapati42-sys/novapay@sha256:")
     msg := sprintf("%s: container %q must use an approved NovaPay GHCR tag or immutable sha256 digest", [input.kind, container.name])
 }
 
