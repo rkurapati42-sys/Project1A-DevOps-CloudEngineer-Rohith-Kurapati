@@ -7,6 +7,8 @@
 
 # Maven output and local caches
 target/
+!target/
+!target/novapay-1.0.0.jar
 .mvn/wrapper/maven-wrapper.jar
 .mvn/wrapper/maven-wrapper.properties
 .mvn/repository/
