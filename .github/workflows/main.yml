@@ -116,8 +116,11 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - name: Checkout source
+      # Gitleaks needs the base and feature-branch history to diff a pull request.
+      - name: Checkout full Git history for secret scanning
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Scan repository for leaked secrets
         uses: gitleaks/gitleaks-action@v3
         env:
