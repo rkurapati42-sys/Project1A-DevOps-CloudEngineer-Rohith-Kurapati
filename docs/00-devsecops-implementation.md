@@ -79,7 +79,7 @@ The workflow uses the Maven SonarScanner plugin and passes the server URL, proje
 
 - Phase 1 — foundation: establish the isolated feature branch, repository conventions, Docker build-context hygiene, and implementation contract.
 - Phase 2 — CI quality and security: real tests/coverage, self-hosted SonarQube quality gate, secret/dependency/SAST scans, Kubernetes validation, and OPA evaluation.
-- Phase 3 — immutable artifact: Docker build, vulnerability scan, SBOM, provenance/signing, and GHCR publication.
+- Phase 3 — immutable artifact: build and scan the container on feature branches/PRs; publish the commit-SHA image to GHCR on `main` with BuildKit SBOM/provenance and Cosign keyless signing. See `docs/09-container-security-ghcr.md`.
 - Phase 4 — GitOps and progressive delivery: reconcile Argo CD paths/namespaces/images and configure canary traffic routing and analysis.
 - Phase 5 — operational verification: deploy to a real cluster, test health/metrics/rollback, and capture evidence.
 
