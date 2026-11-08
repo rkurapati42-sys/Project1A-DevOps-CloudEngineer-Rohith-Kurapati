@@ -34,7 +34,7 @@ spec:
           - templateName: success-rate-and-latency
         args:
           - name: service-name
-            value: novapay-stable
+            value: novapay-canary
   template:
     metadata:
       labels:
