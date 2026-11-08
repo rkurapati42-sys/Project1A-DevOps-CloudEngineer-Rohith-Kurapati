@@ -1,0 +1,25 @@
+# Git and IDE metadata
+.git
+.gitignore
+.github
+.idea
+.vscode
+
+# Maven output and local caches
+target/
+.mvn/wrapper/maven-wrapper.jar
+.mvn/wrapper/maven-wrapper.properties
+.mvn/repository/
+
+# Logs and temporary files
+*.log
+tmp/
+temp/
+
+# Local environment and secret material
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
