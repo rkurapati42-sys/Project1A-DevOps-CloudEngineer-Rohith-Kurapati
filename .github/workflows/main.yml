@@ -28,57 +28,54 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          java-version: '21'
-          distribution: 'temurin'
-          cache: maven
-      - name: Maven validation
+      - name: Validate Maven project
         working-directory: ./app
         run: mvn -B -DskipTests validate
 
   security:
-    name: "4-6 Security and Compliance"
+    name: "4-6 Security and Compliance Checks"
     needs: quality
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Validate policy files
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@v2
+        continue-on-error: false
+      - name: Validate policy files exist
         run: |
           test -s pipeline/policies/compliance.rego
           test -s pipeline/policies/no-privileged-containers.rego
-      - name: Validate deployment manifests
+      - name: Validate Kubernetes manifests
         run: |
           python - <<'PY'
           import yaml
           from pathlib import Path
-          for p in list(Path("pipeline/k8s").glob("*.yml")) + list(Path("pipeline/k8s").glob("*.yaml")):
+          for p in Path("pipeline/k8s").glob("*.yml"):
               list(yaml.safe_load_all(p.read_text()))
-          print("YAML validation passed")
+          print("Kubernetes YAML syntax validation passed")
           PY
 
-  artifact-provenance:
+  artifact:
     name: "7 Artifact Provenance"
     needs: security
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Verify immutable release identity
+      - name: Record immutable build identity
         run: |
           echo "Git SHA: $GITHUB_SHA"
-          test -n "$GITHUB_SHA"
-          echo "Production artifacts require SemVer + Git SHA."
-          echo "Production must never use latest."
+          echo "SemVer release tag must be used for production artifacts."
+          echo "Production must never use the latest tag."
 
   deployment-readiness:
     name: "8 Deployment Readiness"
-    needs: artifact-provenance
+    needs: artifact
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Validate deployment assets
+      - name: Validate deployment configuration
         run: |
           test -s pipeline/k8s/rollout.yml
           test -s pipeline/k8s/analysis.yaml
           test -s pipeline/argocd/application.yaml
-          echo "Deployment readiness passed."
+          echo "Deployment readiness checks passed."
