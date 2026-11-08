@@ -82,7 +82,7 @@ See `docs/09-container-security-ghcr.md` for release details.
 - Kustomize groups the Namespace, Rollout, AnalysisTemplate, Services, and Istio VirtualService.
 - Argo Rollouts uses stable/canary Services and Istio traffic weights.
 - Prometheus analysis checks success rate and p99 latency before traffic progresses.
-- The rollout manifest contains an explicit image placeholder. A release must replace it with the exact verified GHCR SHA/digest before Argo CD sync; do not apply the placeholder.
+- The rollout manifest is pinned to the verified immutable GHCR digest for the current release. Confirm cluster prerequisites, registry pull access, and Cosign policy before Argo CD sync; update the digest through a reviewed release change for subsequent versions.
 
 ## Phase 5 — operational verification
 
@@ -99,3 +99,8 @@ A real cluster must have Argo CD, the Argo Rollouts controller, Istio, and Prome
 ## Acceptance criteria
 
 A green workflow proves the checks executed for that commit. GHCR publication is complete only after the main-branch publish job passes and the digest/signature can be verified. Deployment is complete only after a real cluster reconciles the release and the rollout passes health and metric analysis.
+
+
+### Temporary SonarQube pause
+
+The SonarQube job is temporarily opt-in to avoid waiting for the self-hosted runner. It is skipped unless the repository Actions variable `ENABLE_SONARQUBE` is set to `true`. The container-security job does not depend on SonarQube while this pause is active. Re-enable the job by setting that repository variable to `true`; no workflow code change is required.

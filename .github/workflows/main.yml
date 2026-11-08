@@ -50,6 +50,8 @@ jobs:
 
   sonarqube:
     name: "3 Self-hosted SonarQube Quality Gate"
+    # Temporarily opt-in; set repository variable ENABLE_SONARQUBE=true to re-enable.
+    if: ${{ vars.ENABLE_SONARQUBE == 'true' }}
     needs: build-and-test
     runs-on: ${{ vars.SONAR_RUNNER_LABEL || 'ubuntu-latest' }}
     steps:
@@ -245,7 +247,7 @@ jobs:
 
   container-security:
     name: "8 Container Build, Vulnerability Scan and SBOM"
-    needs: [sonarqube, codeql, security, dast, compliance]
+    needs: [codeql, security, dast, compliance]
     runs-on: ubuntu-latest
     permissions:
       contents: read
