@@ -1,42 +1,53 @@
-package novapay
+package main
 
-import future.keywords.in
+import rego.v1
 
-default allow = false
-
-# Allow deployment only if all compliance checks pass
-allow {
-    not runs_as_root
-    has_resource_limits
-    has_read_only_root_fs
-    no_privileged_containers
+# Apply workload controls to Kubernetes Deployments and Argo Rollouts.
+workload if {
+    input.kind == "Deployment"
 }
 
-# 1. Prevent containers from running as root (PCI-DSS 2.2.4)
-runs_as_root {
-    input.kind == "Deployment"
-    container := input.spec.template.spec.containers[_]
-    container.securityContext.runAsNonRoot != true
+workload if {
+    input.kind == "Rollout"
 }
 
-# 2. Require CPU and Memory limits to prevent DoS (PCI-DSS 6.4.1)
-has_resource_limits {
-    input.kind == "Deployment"
-    container := input.spec.template.spec.containers[_]
-    container.resources.limits.cpu
-    container.resources.limits.memory
+containers := object.get(
+    object.get(object.get(input, "spec", {}), "template", {}),
+    "spec",
+    {},
+).containers
+
+deny contains msg if {
+    workload
+    some container in containers
+    object.get(object.get(container, "securityContext", {}), "runAsNonRoot", false) != true
+    msg := sprintf("%s: container %q must set securityContext.runAsNonRoot=true", [input.kind, container.name])
 }
 
-# 3. Enforce read-only root filesystem (RBI Master Direction Sec 5.1)
-has_read_only_root_fs {
-    input.kind == "Deployment"
-    container := input.spec.template.spec.containers[_]
-    container.securityContext.readOnlyRootFilesystem == true
+deny contains msg if {
+    workload
+    some container in containers
+    object.get(object.get(container, "securityContext", {}), "readOnlyRootFilesystem", false) != true
+    msg := sprintf("%s: container %q must set securityContext.readOnlyRootFilesystem=true", [input.kind, container.name])
 }
 
-# 4. Disallow privileged mode execution
-no_privileged_containers {
-    input.kind == "Deployment"
-    container := input.spec.template.spec.containers[_]
-    not container.securityContext.privileged == true
+deny contains msg if {
+    workload
+    some container in containers
+    object.get(object.get(container, "securityContext", {}), "privileged", false) == true
+    msg := sprintf("%s: container %q must not run in privileged mode", [input.kind, container.name])
+}
+
+deny contains msg if {
+    workload
+    some container in containers
+    not object.get(object.get(container, "resources", {}), "limits", {}).cpu
+    msg := sprintf("%s: container %q must define a CPU limit", [input.kind, container.name])
+}
+
+deny contains msg if {
+    workload
+    some container in containers
+    not object.get(object.get(container, "resources", {}), "limits", {}).memory
+    msg := sprintf("%s: container %q must define a memory limit", [input.kind, container.name])
 }
