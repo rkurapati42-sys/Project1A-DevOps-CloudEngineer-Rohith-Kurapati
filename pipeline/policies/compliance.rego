@@ -17,6 +17,12 @@ containers := object.get(
     {},
 ).containers
 
+limits(container) := object.get(
+    object.get(container, "resources", {}),
+    "limits",
+    {},
+)
+
 deny contains msg if {
     workload
     some container in containers
@@ -41,13 +47,13 @@ deny contains msg if {
 deny contains msg if {
     workload
     some container in containers
-    not object.get(object.get(container, "resources", {}), "limits", {}).cpu
+    not object.get(limits(container), "cpu", "")
     msg := sprintf("%s: container %q must define a CPU limit", [input.kind, container.name])
 }
 
 deny contains msg if {
     workload
     some container in containers
-    not object.get(object.get(container, "resources", {}), "limits", {}).memory
+    not object.get(limits(container), "memory", "")
     msg := sprintf("%s: container %q must define a memory limit", [input.kind, container.name])
 }
