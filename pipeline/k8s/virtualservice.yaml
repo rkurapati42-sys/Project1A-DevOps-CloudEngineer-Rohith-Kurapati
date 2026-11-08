@@ -1,0 +1,23 @@
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: novapay-vservice
+  namespace: production
+spec:
+  hosts:
+    - novapay.example.com
+  gateways:
+    - mesh
+  http:
+    - name: primary
+      route:
+        - destination:
+            host: novapay-stable
+            port:
+              number: 80
+          weight: 100
+        - destination:
+            host: novapay-canary
+            port:
+              number: 80
+          weight: 0
