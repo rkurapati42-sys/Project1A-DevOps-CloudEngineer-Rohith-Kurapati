@@ -165,13 +165,108 @@ jobs:
       - name: Evaluate OPA policies against Kubernetes manifests
         run: conftest test pipeline/k8s --policy pipeline/policies/compliance.rego
 
-  artifact-readiness:
-    name: "7 Artifact and Provenance Readiness"
+  container-security:
+    name: "7 Container Build, Vulnerability Scan and SBOM"
     needs: [sonarqube, codeql, security, compliance]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - name: Record immutable source identity
+      - name: Checkout source
+        uses: actions/checkout@v4
+      - name: Set up Java 21
+        uses: actions/setup-java@v6
+        with:
+          java-version: '21'
+          distribution: temurin
+          cache: maven
+      - name: Package application for container build
+        working-directory: app
+        run: mvn -B --no-transfer-progress clean package -DskipTests
+      - name: Build local container image
         run: |
-          echo "Source commit: $GITHUB_SHA"
-          echo "This phase validates source identity only."
-          echo "Container build, SBOM, signing and registry publication are implemented in Phase 3."
+          docker build --pull --tag novapay:${GITHUB_SHA} app
+      - name: Scan container image for HIGH and CRITICAL vulnerabilities
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: image
+          image-ref: novapay:${{ github.sha }}
+          scanners: vuln,misconfig,secret
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+          format: table
+      - name: Generate container SBOM (CycloneDX)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: image
+          image-ref: novapay:${{ github.sha }}
+          format: cyclonedx
+          output: novapay-image.cdx.json
+          exit-code: '0'
+      - name: Upload container SBOM
+        uses: actions/upload-artifact@v7
+        with:
+          name: novapay-container-sbom
+          path: novapay-image.cdx.json
+          if-no-files-found: error
+          retention-days: 30
+
+  publish-ghcr:
+    name: "8 Publish, Attest and Sign Image in GHCR"
+    needs: container-security
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+      - name: Set up Java 21
+        uses: actions/setup-java@v6
+        with:
+          java-version: '21'
+          distribution: temurin
+          cache: maven
+      - name: Package application for container build
+        working-directory: app
+        run: mvn -B --no-transfer-progress clean package -DskipTests
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and publish immutable image with SBOM and provenance
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ./app
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/novapay:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.description=NovaPay application image
+          sbom: true
+          provenance: mode=max
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+      - name: Sign published image by digest (keyless OIDC)
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/novapay
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+      - name: Record published image reference
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/novapay
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          echo "Published image: ${IMAGE}:${GITHUB_SHA}"
+          echo "Immutable digest: ${IMAGE}@${DIGEST}"
+
