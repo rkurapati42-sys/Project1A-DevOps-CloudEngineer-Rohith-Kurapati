@@ -55,11 +55,21 @@ The repository's Actions settings must permit the declared token permissions. Re
 - [ ] Main-branch run publishes `ghcr.io/<owner>/novapay:<full-commit-sha>`.
 - [ ] BuildKit provenance and SBOM attestations are generated.
 - [ ] Cosign signing and signature verification complete successfully.
-- [ ] The logged digest matches the published GHCR manifest.
+- [x] The logged digest matches the published GHCR manifest (`sha256:37f55d562724ebf13eef6ef2595a6187d434a322f59161309b4a07299e6f5f48`).
 
 ## Security and scope notes
 
 - Feature-branch workflow success proves build and scan behavior, not registry publication.
 - A green publishing job proves image publication/signing, not Kubernetes deployment.
-- The Kubernetes rollout image value is an explicit release placeholder and must be replaced with the verified immutable digest before Argo CD sync.
+- The rollout manifest is pinned to the verified immutable GHCR digest for main release commit `57c4cb90a7a4744c8512cc7105fa7d1213744c2f`. Confirm the target cluster can pull the package and verify its Cosign signature before Argo CD sync.
 - The current workflow uses version tags for third-party Actions. Pin them to reviewed full commit SHAs before production use.
+
+
+## Verified release record — 2026-11-08
+
+- Main commit: `57c4cb90a7a4744c8512cc7105fa7d1213744c2f`
+- Image tag: `ghcr.io/rkurapati42-sys/novapay:57c4cb90a7a4744c8512cc7105fa7d1213744c2f`
+- Immutable image: `ghcr.io/rkurapati42-sys/novapay@sha256:37f55d562724ebf13eef6ef2595a6187d434a322f59161309b4a07299e6f5f48`
+- Main pipeline run: [42440898981](https://github.com/rkurapati42-sys/Project1A-DevOps-CloudEngineer-Rohith-Kurapati/actions/runs/42440898981)
+- The publishing job completed successfully, including Cosign signing and verification.
+- This release record does not assert that a Kubernetes cluster has been deployed or synchronized.
