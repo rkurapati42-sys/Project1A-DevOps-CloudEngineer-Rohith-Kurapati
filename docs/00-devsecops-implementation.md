@@ -17,38 +17,40 @@ There must be one active CI workflow. Do not add a second workflow under `pipeli
 
 ## Target delivery flow
 
-1. Pull request validation: compile, unit tests, coverage, code quality, secret/dependency/static security scans, Kubernetes schema checks, and OPA policy evaluation.
-2. Main-branch release: build a container from the tested application, scan it, generate an SBOM, and publish an immutable commit-SHA tag to GitHub Container Registry (GHCR).
-3. GitOps promotion: update the deployment configuration to the immutable image digest or commit-SHA tag; Argo CD reconciles the desired state.
-4. Progressive delivery: Argo Rollouts shifts traffic only while Prometheus analysis passes.
-5. Recovery: failed analysis aborts promotion and returns traffic to the stable ReplicaSet; operators use documented rollback procedures.
+1. Pull request validation: compile, unit/API-contract tests, coverage, code quality, secret/dependency/static security scans, DAST baseline, Kubernetes schema checks, and OPA policy evaluation.
+2. Main-branch release: reuse the tested Maven artifact, build and scan the container, generate an SBOM, and publish an immutable commit-SHA image to GHCR.
+3. Supply-chain verification: attach BuildKit SBOM/provenance, sign the image digest with Cosign keyless OIDC, and verify the signature.
+4. GitOps promotion: Argo CD reconciles `pipeline/k8s` from this repository. Replace the explicit release-image placeholder with the verified immutable GHCR digest through the approved release-promotion process.
+5. Progressive delivery: Argo Rollouts shifts traffic through Istio while Prometheus analysis checks success rate and p99 latency.
+6. Recovery: failed analysis aborts promotion and returns traffic to the stable ReplicaSet; operators use documented rollback procedures.
 
 ## Naming and environment conventions
 
-- Kubernetes production namespace: `production` (canonical; workload and analysis resources must agree).
-- Container image repository: `ghcr.io/<github-owner>/novapay`.
-- Image identity: immutable Git commit SHA. Do not deploy `latest`.
+- Kubernetes production namespace: `production`.
+- Container image repository: `ghcr.io/rkurapati42-sys/novapay`.
+- Image identity: immutable Git commit SHA or digest. Do not deploy `latest`.
 - Application container port: `8080`.
-- Health endpoint: `/actuator/health` (confirm actuator exposure/configuration before using it as a Kubernetes probe).
+- Health endpoints: `/actuator/health`, `/actuator/health/readiness`, and `/actuator/health/liveness`.
 - Java runtime: Java 21; build system: Maven.
 
-The actual GHCR owner, registry permissions, Kubernetes cluster, ingress/service mesh, Prometheus address, and Argo CD installation are environment-specific prerequisites. They must be supplied as repository or environment configuration; credentials must never be committed.
+The actual Kubernetes cluster, Istio installation/gateway, Prometheus service, Argo CD installation, GHCR package visibility, and production approval controls are environment-specific prerequisites. They must be supplied and verified in the target environment; credentials must never be committed.
 
 ## Phase 1 — foundation
 
-- Isolated branch: `feat/devsecops-phase-1-foundation`.
-- Docker build context excludes local build output, IDE files, environment files, and secret material using `app/.dockerignore`.
+- Isolated feature branch and repository conventions.
+- Docker build-context hygiene using `app/.dockerignore`.
 - Dependabot checks Maven and GitHub Actions dependencies weekly.
 
 ## Phase 2 — CI quality and security
 
-- Maven `clean verify` executes tests and generates a JaCoCo XML coverage report.
-- The self-hosted SonarQube server performs analysis and the workflow waits for its Quality Gate result.
+- Maven `clean verify` executes unit and API-contract tests and generates JaCoCo XML coverage.
+- The build job uploads its compiled output, test classes, packaged JAR, and coverage report as a short-lived artifact.
+- SonarQube downloads and reuses that build output. It runs only the Maven SonarScanner goal; it does not run `clean verify` a second time.
 - CodeQL analyzes Java/Kotlin source code.
-- Gitleaks scans repository history for exposed credentials.
+- Gitleaks scans full repository history.
 - Trivy scans the repository filesystem for HIGH and CRITICAL vulnerabilities, misconfigurations, and secrets.
-- Conftest evaluates the actual Kubernetes Rollout/Deployment pod template against the OPA workload policy.
-- Kubernetes YAML syntax is parsed before policy evaluation.
+- OWASP ZAP performs a passive baseline DAST scan against the running application; the HTML report is retained as a workflow artifact.
+- kubeconform validates known Kubernetes API schemas; Conftest evaluates the manifests against OPA workload policies.
 
 ### Self-hosted SonarQube repository configuration
 
@@ -57,32 +59,43 @@ Configure these GitHub repository settings under **Settings → Secrets and vari
 | Setting | Type | Value |
 |---|---|---|
 | `SONAR_TOKEN` | Actions secret | User token generated in your self-hosted SonarQube server |
-| `SONAR_HOST_URL` | Actions variable | Base URL of your SonarQube server, e.g. `https://sonarqube.example.com` |
+| `SONAR_HOST_URL` | Actions variable | Base URL of your SonarQube server |
 | `SONAR_PROJECT_KEY` | Actions variable | Exact project key created in SonarQube |
-| `SONAR_RUNNER_LABEL` | Optional Actions variable | GitHub Actions runner label that can reach SonarQube; defaults to `ubuntu-latest` |
+| `SONAR_RUNNER_LABEL` | Optional Actions variable | Runner label that can reach SonarQube; defaults to `ubuntu-latest` |
 
-Do not include a trailing path such as `/dashboard` in `SONAR_HOST_URL`; use the server base URL. Use HTTPS and keep the token in the secret store only. The workflow rejects a SonarCloud URL and fails clearly if the required settings are missing. It waits up to 300 seconds for the Quality Gate and fails the job when the gate fails.
+The runner executing the SonarQube job must be able to resolve and connect to `SONAR_HOST_URL`. For a private server, use a secured self-hosted runner inside the network or approved private connectivity. Do not expose a private SonarQube server publicly. The token remains in GitHub Secrets and is never printed.
 
-**Network requirement:** the runner executing the SonarQube job must be able to resolve and connect to `SONAR_HOST_URL`. If the server is private/on-premises and not reachable from GitHub-hosted runners, register a suitably secured GitHub self-hosted runner inside the network (or provide an approved private connectivity path), then set `SONAR_RUNNER_LABEL` to one of that runner's labels. The runner must have Java 21, Maven-compatible network access, and outbound access to required Maven repositories/GitHub actions. Do not expose a private SonarQube server publicly just to make CI work.
+## Phase 3 — container and supply-chain security
 
-The workflow uses the Maven SonarScanner plugin and passes the server URL, project key, and token at runtime. The token is not written to the repository or printed by the workflow.
+- Container build consumes the already-tested Maven JAR rather than rebuilding it.
+- Trivy blocks HIGH/CRITICAL image findings under the configured policy.
+- CycloneDX SBOM is uploaded for every successful feature/PR image scan.
+- Main-branch release publishes a commit-SHA tag to GHCR.
+- BuildKit attaches SBOM and provenance; Cosign keyless signing and verification use GitHub Actions OIDC.
+- Feature-branch and pull-request runs do not publish images.
 
-### Current scope and limitations
+See `docs/09-container-security-ghcr.md` for release details.
 
-- The workflow currently uses version tags for some third-party Actions. Before production use, pin every Action to a reviewed full commit SHA.
-- Trivy filesystem scanning is not a substitute for a dedicated container-image scan; image scanning is part of Phase 3.
-- YAML parsing is syntax validation, not full Kubernetes API-server schema validation. Add schema validation and CRD-aware checks before deployment.
-- The current OPA policy enforces non-root execution, read-only root filesystem, non-privileged containers, and CPU/memory limits on Deployments and Argo Rollouts.
-- CodeQL, SonarQube and vulnerability results depend on external services, server reachability, plugin compatibility, and their configured project/repository settings.
+## Phase 4 — GitOps and progressive delivery
 
-## Implementation phases
+- Argo CD points to this repository's `pipeline/k8s` directory and the canonical `production` namespace.
+- Kustomize groups the Namespace, Rollout, AnalysisTemplate, Services, and Istio VirtualService.
+- Argo Rollouts uses stable/canary Services and Istio traffic weights.
+- Prometheus analysis checks success rate and p99 latency before traffic progresses.
+- The rollout manifest contains an explicit image placeholder. A release must replace it with the exact verified GHCR SHA/digest before Argo CD sync; do not apply the placeholder.
 
-- Phase 1 — foundation: establish the isolated feature branch, repository conventions, Docker build-context hygiene, and implementation contract.
-- Phase 2 — CI quality and security: real tests/coverage, self-hosted SonarQube quality gate, secret/dependency/SAST scans, Kubernetes validation, and OPA evaluation.
-- Phase 3 — immutable artifact: build and scan the container on feature branches/PRs; publish the commit-SHA image to GHCR on `main` with BuildKit SBOM/provenance and Cosign keyless signing. See `docs/09-container-security-ghcr.md`.
-- Phase 4 — GitOps and progressive delivery: reconcile Argo CD paths/namespaces/images and configure canary traffic routing and analysis.
-- Phase 5 — operational verification: deploy to a real cluster, test health/metrics/rollback, and capture evidence.
+## Phase 5 — operational verification
+
+A real cluster must have Argo CD, the Argo Rollouts controller, Istio, and Prometheus installed and configured. Verify reconciliation, image pull access, canary traffic, analysis metrics, health probes, and rollback before claiming a deployment is complete.
+
+## Current limitations and production hardening
+
+- Third-party GitHub Actions are referenced by version tags; pin reviewed full commit SHAs before production use.
+- kubeconform skips missing schemas for CRDs such as Argo Rollouts and Istio; validate those resources against the exact installed CRD versions in the target cluster.
+- The ZAP baseline scan is passive and is not a substitute for authenticated active testing or a full penetration test.
+- The Argo CD Application and rollout resources are configuration, not proof of a live deployment.
+- The assessment app's payment service is a demonstration implementation, not a real payment processor.
 
 ## Acceptance criteria
 
-A green GitHub Actions run is not proof of deployment. Each phase must report what was actually executed. Deployment is considered complete only after a real cluster has reconciled the release and a rollout has passed health and metric analysis.
+A green workflow proves the checks executed for that commit. GHCR publication is complete only after the main-branch publish job passes and the digest/signature can be verified. Deployment is complete only after a real cluster reconciles the release and the rollout passes health and metric analysis.

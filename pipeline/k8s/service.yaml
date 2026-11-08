@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: novapay-stable
+  namespace: production
+spec:
+  type: ClusterIP
+  selector:
+    app: novapay-core
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: novapay-canary
+  namespace: production
+spec:
+  type: ClusterIP
+  selector:
+    app: novapay-core
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP

@@ -6,12 +6,12 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: 'https://github.com/novapay/k8s-manifests'
-    targetRevision: HEAD
-    path: overlays/production
+    repoURL: https://github.com/rkurapati42-sys/Project1A-DevOps-CloudEngineer-Rohith-Kurapati.git
+    targetRevision: main
+    path: pipeline/k8s
   destination:
-    server: 'https://kubernetes.default.svc'
-    namespace: novapay-prod
+    server: https://kubernetes.default.svc
+    namespace: production
   syncPolicy:
     automated:
       prune: true

@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   build-and-test:
-    name: "1-2 Build, Unit Test and Coverage"
+    name: "1-2 Build, Unit Test and API Contract Tests"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout source
@@ -30,6 +30,13 @@ jobs:
       - name: Build, test and generate coverage
         working-directory: app
         run: mvn -B --no-transfer-progress clean verify
+      - name: Upload reusable Maven build output
+        uses: actions/upload-artifact@v7
+        with:
+          name: maven-build-output
+          path: app/target/
+          if-no-files-found: error
+          retention-days: 1
       - name: Upload test and coverage reports
         if: always()
         uses: actions/upload-artifact@v7
@@ -54,6 +61,11 @@ jobs:
           java-version: '21'
           distribution: temurin
           cache: maven
+      - name: Reuse compiled classes and JaCoCo report
+        uses: actions/download-artifact@v7
+        with:
+          name: maven-build-output
+          path: app/target/
       - name: Verify SonarQube configuration
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -71,6 +83,8 @@ jobs:
           case "$SONAR_HOST_URL" in
             *sonarcloud.io*) echo "::error::Configure the self-hosted SonarQube server URL, not SonarCloud"; exit 1 ;;
           esac
+          test -d app/target/classes || { echo "::error::Compiled classes missing from Maven artifact"; exit 1; }
+          test -f app/target/site/jacoco/jacoco.xml || { echo "::error::JaCoCo report missing from Maven artifact"; exit 1; }
       - name: Run SonarQube analysis and wait for Quality Gate
         working-directory: app
         env:
@@ -78,7 +92,7 @@ jobs:
           SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
           SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
         run: |
-          mvn -B --no-transfer-progress clean verify             org.sonarsource.scanner.maven:sonar-maven-plugin:5.1.0.4751:sonar             -Dsonar.host.url="$SONAR_HOST_URL"             -Dsonar.projectKey="$SONAR_PROJECT_KEY"             -Dsonar.token="$SONAR_TOKEN"             -Dsonar.qualitygate.wait=true             -Dsonar.qualitygate.timeout=300
+          mvn -B --no-transfer-progress             org.sonarsource.scanner.maven:sonar-maven-plugin:5.1.0.4751:sonar             -Dsonar.host.url="$SONAR_HOST_URL"             -Dsonar.projectKey="$SONAR_PROJECT_KEY"             -Dsonar.token="$SONAR_TOKEN"             -Dsonar.java.binaries=target/classes             -Dsonar.java.test.binaries=target/test-classes             -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml             -Dsonar.qualitygate.wait=true             -Dsonar.qualitygate.timeout=300
 
   codeql:
     name: "4 SAST - CodeQL"
@@ -116,7 +130,6 @@ jobs:
       contents: read
       security-events: write
     steps:
-      # Gitleaks needs the base and feature-branch history to diff a pull request.
       - name: Checkout full Git history for secret scanning
         uses: actions/checkout@v4
         with:
@@ -136,8 +149,60 @@ jobs:
           exit-code: '1'
           format: table
 
+  dast:
+    name: "6 DAST - OWASP ZAP Baseline"
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Java 21
+        uses: actions/setup-java@v6
+        with:
+          java-version: '21'
+          distribution: temurin
+      - name: Download tested application artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: maven-build-output
+          path: app/target/
+      - name: Start NovaPay for dynamic security testing
+        run: |
+          java -jar app/target/novapay-1.0.0.jar > /tmp/novapay-dast.log 2>&1 &
+          APP_PID=$!
+          echo "$APP_PID" > /tmp/novapay-dast.pid
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:8080/actuator/health >/dev/null; then
+              echo "NovaPay is healthy and ready for DAST"
+              exit 0
+            fi
+            if ! kill -0 "$APP_PID" 2>/dev/null; then
+              cat /tmp/novapay-dast.log
+              exit 1
+            fi
+            sleep 2
+          done
+          cat /tmp/novapay-dast.log
+          echo "::error::NovaPay did not become healthy within 120 seconds"
+          exit 1
+      - name: Run OWASP ZAP passive baseline scan
+        run: |
+          docker run --rm --network host             -v "$PWD:/zap/wrk/:rw"             ghcr.io/zaproxy/zaproxy:stable             zap-baseline.py -t http://127.0.0.1:8080 -m 3 -I -r zap-baseline.html
+      - name: Stop NovaPay
+        if: always()
+        run: |
+          if [ -f /tmp/novapay-dast.pid ]; then
+            kill "$(cat /tmp/novapay-dast.pid)" 2>/dev/null || true
+          fi
+      - name: Upload OWASP ZAP report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: novapay-zap-baseline-report
+          path: zap-baseline.html
+          if-no-files-found: warn
+          retention-days: 14
+
   compliance:
-    name: "6 Kubernetes Validation and OPA Policy Gate"
+    name: "7 Kubernetes Schema and OPA Policy Gates"
     needs: build-and-test
     runs-on: ubuntu-latest
     steps:
@@ -150,8 +215,10 @@ jobs:
           from pathlib import Path
           import yaml
 
-          files = sorted(list(Path("pipeline/k8s").glob("*.yaml")) +
-                         list(Path("pipeline/k8s").glob("*.yml")))
+          files = sorted(
+              path for path in Path("pipeline/k8s").glob("*")
+              if path.suffix in {".yaml", ".yml"} and path.name != "kustomization.yaml"
+          )
           if not files:
               raise SystemExit("No Kubernetes YAML manifests found")
           for path in files:
@@ -160,6 +227,14 @@ jobs:
                   raise SystemExit(f"Empty YAML document in {path}")
               print(f"Validated YAML: {path}")
           PY
+      - name: Install kubeconform
+        run: |
+          curl --fail --silent --show-error --location             https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz             | tar -xz
+          sudo install -m 0755 kubeconform /usr/local/bin/kubeconform
+          kubeconform -v
+      - name: Validate Kubernetes API schemas
+        run: |
+          find pipeline/k8s -type f \( -name '*.yaml' -o -name '*.yml' \) ! -name 'kustomization.yaml' -print0             | xargs -0 kubeconform -strict -ignore-missing-schemas
       - name: Install pinned Conftest
         run: |
           curl --fail --silent --show-error --location             https://github.com/open-policy-agent/conftest/releases/download/v0.56.0/conftest_0.56.0_Linux_x86_64.tar.gz             | tar -xz
@@ -169,26 +244,21 @@ jobs:
         run: conftest test pipeline/k8s --policy pipeline/policies/compliance.rego
 
   container-security:
-    name: "7 Container Build, Vulnerability Scan and SBOM"
-    needs: [sonarqube, codeql, security, compliance]
+    name: "8 Container Build, Vulnerability Scan and SBOM"
+    needs: [sonarqube, codeql, security, dast, compliance]
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
-      - name: Set up Java 21
-        uses: actions/setup-java@v6
+      - name: Download tested Maven artifact
+        uses: actions/download-artifact@v7
         with:
-          java-version: '21'
-          distribution: temurin
-          cache: maven
-      - name: Package application for container build
-        working-directory: app
-        run: mvn -B --no-transfer-progress clean package -DskipTests
+          name: maven-build-output
+          path: app/target/
       - name: Build local container image
-        run: |
-          docker build --pull --tag novapay:${GITHUB_SHA} app
+        run: docker build --pull --tag novapay:${{ github.sha }} app
       - name: Scan container image for HIGH and CRITICAL vulnerabilities
         uses: aquasecurity/trivy-action@v0.36.0
         with:
@@ -216,7 +286,7 @@ jobs:
           retention-days: 30
 
   publish-ghcr:
-    name: "8 Publish, Attest and Sign Image in GHCR"
+    name: "9 Publish, Attest and Sign Image in GHCR"
     needs: container-security
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
@@ -228,15 +298,11 @@ jobs:
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
-      - name: Set up Java 21
-        uses: actions/setup-java@v6
+      - name: Download tested Maven artifact
+        uses: actions/download-artifact@v7
         with:
-          java-version: '21'
-          distribution: temurin
-          cache: maven
-      - name: Package application for container build
-        working-directory: app
-        run: mvn -B --no-transfer-progress clean package -DskipTests
+          name: maven-build-output
+          path: app/target/
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Log in to GitHub Container Registry
@@ -265,6 +331,12 @@ jobs:
           IMAGE: ghcr.io/${{ github.repository_owner }}/novapay
           DIGEST: ${{ steps.build.outputs.digest }}
         run: cosign sign --yes "${IMAGE}@${DIGEST}"
+      - name: Verify signed image
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/novapay
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          cosign verify "${IMAGE}@${DIGEST}"             --certificate-identity-regexp="https://github.com/${{ github.repository }}/.github/workflows/.*"             --certificate-oidc-issuer="https://token.actions.githubusercontent.com"
       - name: Record published image reference
         env:
           IMAGE: ghcr.io/${{ github.repository_owner }}/novapay
@@ -272,4 +344,3 @@ jobs:
         run: |
           echo "Published image: ${IMAGE}:${GITHUB_SHA}"
           echo "Immutable digest: ${IMAGE}@${DIGEST}"
-
